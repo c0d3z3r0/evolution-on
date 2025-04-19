@@ -39,6 +39,8 @@
 #include <glib/gprintf.h>
 #endif
 
+void block_exit_handler(gboolean block);
+
 /******************************************************************************
  * Query dconf
  *****************************************************************************/
@@ -99,6 +101,7 @@ toggle_hidden_on_close_cb(GtkWidget *widget, gpointer data)
 	g_return_if_fail(widget != NULL);
 	set_part_enabled(TRAY_SCHEMA, CONF_KEY_HIDE_ON_CLOSE,
 			gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget)));
+	block_exit_handler(is_part_enabled(TRAY_SCHEMA, CONF_KEY_HIDE_ON_CLOSE));
 }
 
 /******************************************************************************

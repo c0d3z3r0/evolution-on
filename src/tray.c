@@ -53,8 +53,21 @@
 static gulong show_window_handle = 0;
 static gboolean show_window_cb_called = FALSE;
 struct OnIcon on_icon = ONICON_NEW;
+static gulong delete_handler = 0;
 
 static gint sx, sy;
+
+void block_exit_handler(gboolean block)
+{
+	if (!delete_handler)
+		return;
+
+	if (block) {
+		g_signal_handler_block(G_OBJECT(on_icon.evo_window), delete_handler);
+	} else {
+		g_signal_handler_unblock(G_OBJECT(on_icon.evo_window), delete_handler);
+	}
+}
 
 /* Raise the window */
 void
@@ -334,7 +347,7 @@ org_gnome_mail_read_notify(EPlugin *ep, EMEventTargetMessage *t)
 }
 /* Change window state */
 static gboolean
-window_state_event(GtkWidget *widget, GdkEventWindowState *event)
+window_state_event(GtkWindow *window, GdkEventWindowState *event)
 {
 	gint x, y; /* to save window position */
 	gint width, height; /* to save window size */
@@ -347,25 +360,25 @@ window_state_event(GtkWidget *widget, GdkEventWindowState *event)
 		/* GTK documentation says that it is not rediable way to save 
 		 * and restore window postion and we should use the native windowing
 		 * APIs instead. However, I am not digging into xlib yet.*/
-		 gtk_window_get_position(GTK_WINDOW(widget), &x, &y);
-		 gtk_window_get_size(GTK_WINDOW(widget), &width, &height);
+		 gtk_window_get_position(window, &x, &y);
+		 gtk_window_get_size(window, &width, &height);
 #ifdef DEBUG
 		g_printf("Evolution-on: Window Positions: x:%i y:%i\n", x, y);
 		g_printf("Evolution-on: Window Sizes: width:%i height:%i\n", width, height);
 #endif
-		gtk_window_set_default_size(GTK_WINDOW(widget), width, height);
+		gtk_window_set_default_size(window, width, height);
 		if (event->new_window_state && GDK_WINDOW_STATE_ICONIFIED) {
 			on_icon.toggle_window_func();
 		} else {
-			gtk_window_deiconify(GTK_WINDOW(widget));
-			gtk_window_move(GTK_WINDOW(widget), x, y);
+			gtk_window_deiconify(window);
+			gtk_window_move(window, x, y);
 		}
 	}
 	return FALSE;
 }
 /* Handle window deletion */
-gboolean
-on_widget_deleted(GtkWidget *widget, GdkEvent * /*event*/, gpointer /*data*/)
+static gboolean
+on_window_delete (GtkWindow *window, GdkEvent * /*event*/, gpointer /*data*/)
 {
 #ifdef DEBUG
 	g_printf("Evolution-on: Founction call %s\n", __func__);
@@ -378,7 +391,7 @@ on_widget_deleted(GtkWidget *widget, GdkEvent * /*event*/, gpointer /*data*/)
 }
 
 gboolean
-e_plugin_ui_init(GtkUIManager *ui_manager, EShellView *shell_view)
+e_plugin_ui_init(EUIManager *ui_manager, EShellView *shell_view)
 {
 #ifdef DEBUG
 	g_printf("Evolution-on: Founction call %s\n", __func__);
@@ -386,10 +399,12 @@ e_plugin_ui_init(GtkUIManager *ui_manager, EShellView *shell_view)
 	GdkDisplay *display;
 	GdkMonitor *monitor;
 	GdkRectangle geometry;
+	GApplication *application;
 	
 	display = gdk_display_get_default();
 	monitor = gdk_display_get_monitor(display, 0);
 	gdk_monitor_get_geometry(monitor, &geometry);
+	application = G_APPLICATION (e_shell_get_default());
 	
 	sx = geometry.width;
 	sy = geometry.height;
@@ -399,11 +414,17 @@ e_plugin_ui_init(GtkUIManager *ui_manager, EShellView *shell_view)
 	show_window_handle = g_signal_connect(G_OBJECT(on_icon.evo_window),
 			"show", G_CALLBACK(shown_window_cb), &on_icon);
 
+	delete_handler = g_signal_handler_find(G_OBJECT(on_icon.evo_window), G_SIGNAL_MATCH_ID | G_SIGNAL_MATCH_DATA,
+				g_signal_lookup("delete-event", G_TYPE_FROM_INSTANCE (on_icon.evo_window)),
+				0, NULL, NULL, application);
+
 	g_signal_connect(G_OBJECT(on_icon.evo_window), "window-state-event",
 			G_CALLBACK(window_state_event), NULL);
 
 	g_signal_connect(G_OBJECT(on_icon.evo_window), "delete-event",
-            G_CALLBACK(on_widget_deleted), NULL);
+			G_CALLBACK(on_window_delete), application);
+
+	block_exit_handler(is_part_enabled(TRAY_SCHEMA, CONF_KEY_HIDE_ON_CLOSE));
 
 	if (!on_icon.quit_func)
 		create_icon(&on_icon, do_properties, do_quit, toggle_window);
